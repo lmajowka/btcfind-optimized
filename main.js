@@ -1,47 +1,37 @@
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
+const crypto = require('crypto');
+const bs58check = require('bs58check');
 
-const min = 0x2a90675934c000000;
-const max = 0x3ffffffffffffffff;
-const numThreads = 4; // Number of parallel threads
-const wallets = ['13zb1hQbWVsc2S7ZTZnP2G4undNNpdh5so'];
-
-const startTime = Date.now()
-
-// Function to create worker threads
-function createWorker(start, end) {
-    return new Promise((resolve, reject) => {
-        const worker = new Worker(__filename, {
-            workerData: { start, end, wallets }
-        });
-        worker.on('message', resolve);
-        worker.on('error', reject);
-        worker.on('exit', (code) => {
-            if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
-        });
-    });
+// Função para gerar uma chave privada aleatória
+function generatePrivateKey() {
+    return crypto.randomBytes(32);
 }
 
-// Main function to distribute the range among workers
-async function main() {
-    const range = Math.floor((max - min) / numThreads);
-    const promises = [];
-    for (let i = 0; i < numThreads; i++) {
-        const start = min + i * range;
-        const end = (i === numThreads - 1) ? max : start + range - 1;
-        promises.push(createWorker(start, end));
-    }
-
-    try {
-        await Promise.all(promises);
-        console.log('All workers completed successfully');
-        console.log('Tempo: ', (Date.now() - startTime)/1000)
-    } catch (error) {
-        console.error(error);
-    }
+// Função para calcular o SHA-256 seguido do RIPEMD-160
+function sha256ripemd160(buffer) {
+    const sha256 = crypto.createHash('sha256').update(buffer).digest();
+    return crypto.createHash('ripemd160').update(sha256).digest();
 }
 
-if (isMainThread) {
-    main();
-} else {
-    require('./worker');
+// Função para derivar a chave pública a partir da chave privada usando secp256k1
+function derivePublicKey(privateKey) {
+    const { publicKey } = crypto.createECDH('secp256k1');
+    publicKey.setPrivateKey(privateKey);
+    return publicKey.getPublicKey();
 }
+
+// Função para gerar um endereço Bitcoin a partir de uma chave pública
+function generateBitcoinAddress(publicKey) {
+    const publicKeyHash = sha256ripemd160(publicKey);
+    const versionedPayload = Buffer.concat([Buffer.from([0x00]), publicKeyHash]);
+    return bs58check.encode(versionedPayload);
+}
+
+// Gerar chave privada, chave pública e endereço Bitcoin
+const privateKey = generatePrivateKey();
+const publicKey = derivePublicKey(privateKey);
+const bitcoinAddress = generateBitcoinAddress(publicKey);
+
+// Exibir resultados
+console.log('Chave Privada:', privateKey.toString('hex'));
+console.log('Chave Pública:', publicKey.toString('hex'));
+console.log('Endereço Bitcoin:', bitcoinAddress);
